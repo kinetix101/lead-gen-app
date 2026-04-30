@@ -9,7 +9,7 @@ app = Flask(__name__)
 CORS(app)
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-APOLLO_API_KEY = os.environ.get("APOLLO_API_KEY")
+HUNTER_API_KEY = os.environ.get("HUNTER_API_KEY")
 
 client = Groq(api_key=GROQ_API_KEY)
 
@@ -41,7 +41,8 @@ def analyze():
         "company_stage": ["startup", "growth", "enterprise"],
         "pain_points": ["pain1", "pain2", "pain3"],
         "job_titles_to_target": ["title1", "title2"],
-        "icp_summary": "2-sentence summary of the ideal customer"
+        "icp_summary": "2-sentence summary of the ideal customer",
+        "search_keywords": ["keyword1", "keyword2", "keyword3"]
     }}
     """
 
@@ -50,45 +51,51 @@ def analyze():
     return jsonify(icp)
 
 
-# ── 2. Search for leads via Apollo ───────────────────────────────────────────
+# ── 2. Search for leads via Hunter ───────────────────────────────────────────
 @app.route("/search-leads", methods=["POST"])
 def search_leads():
     data = request.json
     icp = data.get("icp", {})
 
-    payload = {
-        "api_key": APOLLO_API_KEY,
-        "per_page": 10,
-        "person_titles": icp.get("job_titles_to_target", ["CEO", "Founder"]),
-        "organization_num_employees_ranges": [
-            f"{icp['company_size']['min']},{icp['company_size']['max']}"
-        ],
-    }
-
+    keywords = icp.get("search_keywords", [])
     industries = icp.get("target_industries", [])
-    if industries:
-        payload["q_organization_keyword_tags"] = industries
-
-    res = requests.post(
-        "https://api.apollo.io/v1/mixed_people/search",
-        json=payload
-    )
-
-    people = res.json().get("people", [])
+    search_terms = keywords + industries
 
     leads = []
-    for p in people:
-        org = p.get("organization") or {}
-        leads.append({
-            "name": p.get("name", ""),
-            "title": p.get("title", ""),
-            "email": p.get("email", ""),
-            "company": org.get("name", ""),
-            "industry": org.get("industry", ""),
-            "employees": org.get("num_employees", ""),
-            "website": org.get("website_url", ""),
-            "linkedin": p.get("linkedin_url", ""),
-        })
+    seen_domains = set()
+
+    for term in search_terms[:3]:
+        res = requests.get(
+            "https://api.hunter.io/v2/domain-search",
+            params={
+                "company": term,
+                "api_key": HUNTER_API_KEY,
+                "limit": 5,
+                "seniority": "senior,executive",
+            }
+        )
+
+        result = res.json().get("data", {})
+        domain = result.get("domain", "")
+        company = result.get("organization", term)
+        emails = result.get("emails", [])
+
+        if domain and domain not in seen_domains and emails:
+            seen_domains.add(domain)
+            for e in emails[:3]:
+                title = e.get("position", "")
+                targeted_titles = [t.lower() for t in icp.get("job_titles_to_target", [])]
+                if any(t in title.lower() for t in targeted_titles) or not targeted_titles:
+                    leads.append({
+                        "name": f"{e.get('first_name', '')} {e.get('last_name', '')}".strip(),
+                        "title": title,
+                        "email": e.get("value", ""),
+                        "company": company,
+                        "industry": ", ".join(industries[:2]),
+                        "employees": "",
+                        "website": f"https://{domain}",
+                        "linkedin": e.get("linkedin", ""),
+                    })
 
     return jsonify(leads)
 
@@ -115,7 +122,6 @@ def qualify_leads():
         - Title: {lead['title']}
         - Company: {lead['company']}
         - Industry: {lead['industry']}
-        - Employees: {lead['employees']}
         - Website: {lead['website']}
 
         Return ONLY a JSON object with no extra text, no explanation:
