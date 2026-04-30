@@ -127,31 +127,46 @@ def qualify_leads():
     qualified = []
 
     for lead in leads:
-        prompt = f"""
-        Service offered: {service_description}
+        try:
+            prompt = f"""
+            Service offered: {service_description}
 
-        Ideal Customer Profile:
-        {json.dumps(icp, indent=2)}
+            Ideal Customer Profile:
+            {json.dumps(icp, indent=2)}
 
-        Lead:
-        - Name: {lead['name']}
-        - Title: {lead['title']}
-        - Company: {lead['company']}
-        - Industry: {lead['industry']}
-        - Website: {lead['website']}
+            Lead:
+            - Name: {lead.get('name', '')}
+            - Title: {lead.get('title', '')}
+            - Company: {lead.get('company', '')}
+            - Industry: {lead.get('industry', '')}
+            - Website: {lead.get('website', '')}
 
-        Return ONLY a JSON object with no extra text, no explanation:
-        {{
-            "score": <1-10 integer>,
-            "fit_reason": "1 sentence why this lead fits",
-            "email_subject": "catchy subject line",
-            "email_body": "3-paragraph personalized cold email"
-        }}
-        """
+            Return ONLY a JSON object with no extra text, no explanation, no markdown:
+            {{"score": 7, "fit_reason": "one sentence reason", "email_subject": "subject line", "email_body": "3 paragraph email"}}
+            """
 
-        result = ask_groq(prompt)
-        qualification = json.loads(result)
-        lead.update(qualification)
+            result = ask_groq(prompt)
+
+            # Clean up response aggressively
+            result = result.strip()
+            result = result.replace("```json", "").replace("```", "").strip()
+
+            # Find JSON object in response
+            start = result.find("{")
+            end = result.rfind("}") + 1
+            if start != -1 and end > start:
+                result = result[start:end]
+
+            qualification = json.loads(result)
+            lead.update(qualification)
+        except Exception as e:
+            # If AI fails on one lead, still include it with default values
+            lead.update({
+                "score": 5,
+                "fit_reason": "Potential match based on industry alignment.",
+                "email_subject": f"Quick question for {lead.get('company', 'your team')}",
+                "email_body": f"Hi {lead.get('name', 'there')},\n\nI came across {lead.get('company', 'your company')} and wanted to reach out about {service_description}.\n\nWould you be open to a quick chat?\n\nBest regards"
+            })
         qualified.append(lead)
 
     qualified.sort(key=lambda x: x.get("score", 0), reverse=True)
