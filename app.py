@@ -56,49 +56,65 @@ def analyze():
 def search_leads():
     data = request.json
     icp = data.get("icp", {})
+    service_description = data.get("service_description", "")
 
-    keywords = icp.get("search_keywords", [])
-    industries = icp.get("target_industries", [])
-    search_terms = keywords + industries
+    # Ask Groq to suggest real company domains to target
+    prompt = f"""
+    A service provider offers: {service_description}
+
+    Their ideal customer industries are: {', '.join(icp.get('target_industries', []))}
+    Target job titles: {', '.join(icp.get('job_titles_to_target', []))}
+
+    List 10 real company website domains (just the domain, e.g. "maybank.com") that would be ideal customers.
+    Focus on well-known companies. Return ONLY a JSON array of strings, no explanation:
+    ["domain1.com", "domain2.com", ...]
+    """
+
+    domains_raw = ask_groq(prompt)
+    try:
+        domains = json.loads(domains_raw)
+    except:
+        domains = ["grab.com", "lazada.com", "airasia.com", "petronas.com", "celcom.com.my"]
 
     leads = []
-    seen_domains = set()
+    seen = set()
 
-    for term in search_terms[:3]:
-        res = requests.get(
-            "https://api.hunter.io/v2/domain-search",
-            params={
-                "company": term,
-                "api_key": HUNTER_API_KEY,
-                "limit": 5,
-                "seniority": "senior,executive",
-            }
-        )
+    for domain in domains[:8]:
+        try:
+            res = requests.get(
+                "https://api.hunter.io/v2/domain-search",
+                params={
+                    "domain": domain,
+                    "api_key": HUNTER_API_KEY,
+                    "limit": 3,
+                    "seniority": "senior,executive",
+                }
+            )
+            result = res.json().get("data", {})
+            if not result:
+                continue
 
-        result = res.json().get("data", {})
-        domain = result.get("domain", "")
-        company = result.get("organization", term)
-        emails = result.get("emails", [])
+            company = result.get("organization", domain)
+            website = f"https://{domain}"
+            emails = result.get("emails", [])
 
-        if domain and domain not in seen_domains and emails:
-            seen_domains.add(domain)
-            for e in emails[:3]:
-                title = e.get("position", "")
-                targeted_titles = [t.lower() for t in icp.get("job_titles_to_target", [])]
-                if any(t in title.lower() for t in targeted_titles) or not targeted_titles:
+            if domain not in seen and emails:
+                seen.add(domain)
+                for e in emails[:2]:
                     leads.append({
                         "name": f"{e.get('first_name', '')} {e.get('last_name', '')}".strip(),
-                        "title": title,
+                        "title": e.get("position", ""),
                         "email": e.get("value", ""),
                         "company": company,
-                        "industry": ", ".join(industries[:2]),
+                        "industry": ", ".join(icp.get("target_industries", [])[:2]),
                         "employees": "",
-                        "website": f"https://{domain}",
+                        "website": website,
                         "linkedin": e.get("linkedin", ""),
                     })
+        except:
+            continue
 
     return jsonify(leads)
-
 
 # ── 3. Score leads and write outreach email ──────────────────────────────────
 @app.route("/qualify-leads", methods=["POST"])
