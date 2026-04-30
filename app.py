@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import google.generativeai as genai
+from groq import Groq
 import requests
 import os
 import json
@@ -8,17 +8,21 @@ import json
 app = Flask(__name__)
 CORS(app)
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 APOLLO_API_KEY = os.environ.get("APOLLO_API_KEY")
 
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
+client = Groq(api_key=GROQ_API_KEY)
 
-def ask_gemini(prompt):
-    response = model.generate_content(prompt)
-    raw = response.text.strip()
+def ask_groq(prompt):
+    response = client.chat.completions.create(
+        model="llama3-70b-8192",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.3,
+    )
+    raw = response.choices[0].message.content.strip()
     raw = raw.replace("```json", "").replace("```", "").strip()
     return raw
+
 
 # ── 1. Analyze user's service and build ICP ──────────────────────────────────
 @app.route("/analyze", methods=["POST"])
@@ -30,7 +34,7 @@ def analyze():
     A user offers the following product or service:
     "{service_description}"
 
-    Based on this, extract their Ideal Customer Profile (ICP) and return ONLY a JSON object with no extra text:
+    Based on this, extract their Ideal Customer Profile (ICP) and return ONLY a JSON object with no extra text, no explanation:
     {{
         "target_industries": ["industry1", "industry2"],
         "company_size": {{ "min": 10, "max": 500 }},
@@ -41,7 +45,7 @@ def analyze():
     }}
     """
 
-    result = ask_gemini(prompt)
+    result = ask_groq(prompt)
     icp = json.loads(result)
     return jsonify(icp)
 
@@ -114,7 +118,7 @@ def qualify_leads():
         - Employees: {lead['employees']}
         - Website: {lead['website']}
 
-        Return ONLY a JSON object with no extra text:
+        Return ONLY a JSON object with no extra text, no explanation:
         {{
             "score": <1-10 integer>,
             "fit_reason": "1 sentence why this lead fits",
@@ -123,7 +127,7 @@ def qualify_leads():
         }}
         """
 
-        result = ask_gemini(prompt)
+        result = ask_groq(prompt)
         qualification = json.loads(result)
         lead.update(qualification)
         qualified.append(lead)
