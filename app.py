@@ -65,8 +65,8 @@ def search_leads():
     Their ideal customer industries are: {', '.join(icp.get('target_industries', []))}
     Target job titles: {', '.join(icp.get('job_titles_to_target', []))}
 
-    List 10 real company website domains (just the domain, e.g. "maybank.com") that would be ideal customers.
-    Focus on well-known companies. Return ONLY a JSON array of strings, no explanation:
+    List 10 real Malaysian company website domains (just the domain, e.g. "maybank.com") that would be ideal customers in Malaysia.
+    Focus on small to medium Malaysian businesses, NOT global giants like Amazon or Google. Return ONLY a JSON array of strings, no explanation:
     ["domain1.com", "domain2.com", ...]
     """
 
