@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import anthropic
+import google.generativeai as genai
 import requests
 import os
 import json
@@ -8,8 +8,17 @@ import json
 app = Flask(__name__)
 CORS(app)
 
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 APOLLO_API_KEY = os.environ.get("APOLLO_API_KEY")
+
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel("gemini-1.5-flash")
+
+def ask_gemini(prompt):
+    response = model.generate_content(prompt)
+    raw = response.text.strip()
+    raw = raw.replace("```json", "").replace("```", "").strip()
+    return raw
 
 # ── 1. Analyze user's service and build ICP ──────────────────────────────────
 @app.route("/analyze", methods=["POST"])
@@ -17,11 +26,9 @@ def analyze():
     data = request.json
     service_description = data.get("service_description", "")
 
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-
     prompt = f"""
     A user offers the following product or service:
-    \"{service_description}\"
+    "{service_description}"
 
     Based on this, extract their Ideal Customer Profile (ICP) and return ONLY a JSON object with no extra text:
     {{
@@ -34,15 +41,8 @@ def analyze():
     }}
     """
 
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=1000,
-        messages=[{"role": "user", "content": prompt}]
-    )
-
-    raw = response.content[0].text.strip()
-    raw = raw.replace("```json", "").replace("```", "").strip()
-    icp = json.loads(raw)
+    result = ask_gemini(prompt)
+    icp = json.loads(result)
     return jsonify(icp)
 
 
@@ -97,7 +97,6 @@ def qualify_leads():
     icp = data.get("icp", {})
     service_description = data.get("service_description", "")
 
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     qualified = []
 
     for lead in leads:
@@ -124,16 +123,9 @@ def qualify_leads():
         }}
         """
 
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=600,
-            messages=[{"role": "user", "content": prompt}]
-        )
-
-        raw = response.content[0].text.strip()
-        raw = raw.replace("```json", "").replace("```", "").strip()
-        result = json.loads(raw)
-        lead.update(result)
+        result = ask_gemini(prompt)
+        qualification = json.loads(result)
+        lead.update(qualification)
         qualified.append(lead)
 
     qualified.sort(key=lambda x: x.get("score", 0), reverse=True)
