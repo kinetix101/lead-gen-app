@@ -41,12 +41,15 @@ def analyze():
         "company_stage": ["startup", "growth", "enterprise"],
         "pain_points": ["pain1", "pain2", "pain3"],
         "job_titles_to_target": ["title1", "title2"],
-        "icp_summary": "2-sentence summary of the ideal customer",
-        "search_keywords": ["keyword1", "keyword2", "keyword3"]
+        "icp_summary": "2-sentence summary of the ideal customer"
     }}
     """
 
     result = ask_groq(prompt)
+    start = result.find("{")
+    end = result.rfind("}") + 1
+    if start != -1 and end > start:
+        result = result[start:end]
     icp = json.loads(result)
     return jsonify(icp)
 
@@ -57,127 +60,12 @@ def search_leads():
     data = request.json
     icp = data.get("icp", {})
     service_description = data.get("service_description", "")
+    country = data.get("country", "Malaysia")
 
-    # Ask Groq to suggest real company domains to target
+    industries = icp.get("target_industries", [])
+    keywords = icp.get("search_keywords", [])
+    job_titles = icp.get("job_titles_to_target", [])
+
+    # Ask Groq to suggest real company domains in the target country
     prompt = f"""
-    A service provider offers: {service_description}
-
-    Their ideal customer industries are: {', '.join(icp.get('target_industries', []))}
-    Target job titles: {', '.join(icp.get('job_titles_to_target', []))}
-
-    List 10 real Malaysian company website domains (just the domain, e.g. "maybank.com") that would be ideal customers in Malaysia.
-    Focus on small to medium Malaysian businesses, NOT global giants like Amazon or Google. Return ONLY a JSON array of strings, no explanation:
-    ["domain1.com", "domain2.com", ...]
-    """
-
-    domains_raw = ask_groq(prompt)
-    try:
-        domains = json.loads(domains_raw)
-    except:
-        domains = ["grab.com", "lazada.com", "airasia.com", "petronas.com", "celcom.com.my"]
-
-    leads = []
-    seen = set()
-
-    for domain in domains[:8]:
-        try:
-            res = requests.get(
-                "https://api.hunter.io/v2/domain-search",
-                params={
-                    "domain": domain,
-                    "api_key": HUNTER_API_KEY,
-                    "limit": 3,
-                    "seniority": "senior,executive",
-                }
-            )
-            result = res.json().get("data", {})
-            if not result:
-                continue
-
-            company = result.get("organization", domain)
-            website = f"https://{domain}"
-            emails = result.get("emails", [])
-
-            if domain not in seen and emails:
-                seen.add(domain)
-                for e in emails[:2]:
-                    leads.append({
-                        "name": f"{e.get('first_name', '')} {e.get('last_name', '')}".strip(),
-                        "title": e.get("position", ""),
-                        "email": e.get("value", ""),
-                        "company": company,
-                        "industry": ", ".join(icp.get("target_industries", [])[:2]),
-                        "employees": "",
-                        "website": website,
-                        "linkedin": e.get("linkedin", ""),
-                    })
-        except:
-            continue
-
-    return jsonify(leads)
-
-# ── 3. Score leads and write outreach email ──────────────────────────────────
-@app.route("/qualify-leads", methods=["POST"])
-def qualify_leads():
-    data = request.json
-    leads = data.get("leads", [])
-    icp = data.get("icp", {})
-    service_description = data.get("service_description", "")
-
-    qualified = []
-
-    for lead in leads:
-        try:
-            prompt = f"""
-            Service offered: {service_description}
-
-            Ideal Customer Profile:
-            {json.dumps(icp, indent=2)}
-
-            Lead:
-            - Name: {lead.get('name', '')}
-            - Title: {lead.get('title', '')}
-            - Company: {lead.get('company', '')}
-            - Industry: {lead.get('industry', '')}
-            - Website: {lead.get('website', '')}
-
-            Return ONLY a JSON object with no extra text, no explanation, no markdown:
-            {{"score": 7, "fit_reason": "one sentence reason", "email_subject": "subject line", "email_body": "3 paragraph email"}}
-            """
-
-            result = ask_groq(prompt)
-
-            # Clean up response aggressively
-            result = result.strip()
-            result = result.replace("```json", "").replace("```", "").strip()
-
-            # Find JSON object in response
-            start = result.find("{")
-            end = result.rfind("}") + 1
-            if start != -1 and end > start:
-                result = result[start:end]
-
-            qualification = json.loads(result)
-            lead.update(qualification)
-        except Exception as e:
-            # If AI fails on one lead, still include it with default values
-            lead.update({
-                "score": 5,
-                "fit_reason": "Potential match based on industry alignment.",
-                "email_subject": f"Quick question for {lead.get('company', 'your team')}",
-                "email_body": f"Hi {lead.get('name', 'there')},\n\nI came across {lead.get('company', 'your company')} and wanted to reach out about {service_description}.\n\nWould you be open to a quick chat?\n\nBest regards"
-            })
-        qualified.append(lead)
-
-    qualified.sort(key=lambda x: x.get("score", 0), reverse=True)
-    return jsonify(qualified)
-
-
-# ── Health check ─────────────────────────────────────────────────────────────
-@app.route("/", methods=["GET"])
-def health():
-    return jsonify({"status": "ok"})
-
-
-if __name__ == "__main__":
-    app.run(debug=True)
+    A service p
